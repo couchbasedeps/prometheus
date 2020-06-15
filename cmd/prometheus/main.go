@@ -180,6 +180,21 @@ func main() {
 	a.Flag("web.cors.origin", `Regex for CORS origin. It is fully anchored. Example: 'https?://(domain1|domain2)\.com'`).
 		Default(".*").StringVar(&cfg.corsRegexString)
 
+	a.Flag("web.auth-enabled", "Enable simple Authentication for web.").
+		Default("false").BoolVar(&cfg.web.AuthEnabled)
+
+	a.Flag("web.basicauth.username", "Username to allow.").
+		Default("").StringVar(&cfg.web.BasicAuthUsername)
+
+	a.Flag("web.basicauth.hash", "Expected resultant hash.").
+		Default("").StringVar(&cfg.web.BasicAuthHash)
+
+	a.Flag("web.basicauth.salt", "Salt to use when generating hash").
+		Default("").StringVar(&cfg.web.BasicAuthSalt)
+
+	a.Flag("web.basicauth.iterations", "Number of iterations when generating hash").
+		 Default("4000").IntVar(&cfg.web.BasicAuthIterations)
+
 	a.Flag("storage.tsdb.path", "Base path for metrics storage.").
 		Default("data/").StringVar(&cfg.localStoragePath)
 
