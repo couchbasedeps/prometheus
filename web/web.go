@@ -16,6 +16,9 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/sha512"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -55,6 +58,7 @@ import (
 	"github.com/prometheus/prometheus/tsdb/index"
 	"github.com/soheilhy/cmux"
 	"golang.org/x/net/netutil"
+	"golang.org/x/crypto/pbkdf2"
 	"google.golang.org/grpc"
 
 	"github.com/prometheus/prometheus/config"
@@ -241,6 +245,11 @@ type Options struct {
 	RemoteReadSampleLimit      int
 	RemoteReadConcurrencyLimit int
 	RemoteReadBytesInFrame     int
+	AuthEnabled                bool
+	BasicAuthUsername          string
+	BasicAuthHash              string
+	BasicAuthSalt              string
+	BasicAuthIterations        int
 
 	Gatherer   prometheus.Gatherer
 	Registerer prometheus.Registerer
@@ -483,11 +492,46 @@ func (h *Handler) isReady() bool {
 	return ready > 0
 }
 
+func (h *Handler) is_authenticated(r *http.Request) (bool, string) {
+    if h.options.AuthEnabled == false {
+        return true, ""
+    }
+
+	username, password, ok := r.BasicAuth()
+	if ok == true {
+		hash, err := base64.StdEncoding.DecodeString(h.options.BasicAuthHash)
+		if err != nil {
+			return false, fmt.Sprintf("Error decoding basic auth hash: ", err)
+		}
+		salt, err := base64.StdEncoding.DecodeString(h.options.BasicAuthSalt)
+		if err != nil {
+			return false, fmt.Sprintf("Error decoding basic auth salt: ", err)
+		}
+		if username != h.options.BasicAuthUsername {
+			return false, fmt.Sprintf("Unauthorized user")
+		}
+		key := pbkdf2.Key([]byte(password), salt,
+						   h.options.BasicAuthIterations, 64, sha512.New)
+		if subtle.ConstantTimeCompare(key, hash) == 0 {
+			return false, fmt.Sprintf("Incorrect password")
+		}
+	} else {
+		return false, fmt.Sprintf("Error returned by BasicAuth")
+	}
+	return true, ""
+}
+
 // Checks if server is ready, calls f if it is, returns 503 if it is not.
 func (h *Handler) testReady(f http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if h.isReady() {
-			f(w, r)
+			authenticated, err := h.is_authenticated(r)
+			if authenticated {
+				f(w, r)
+			} else {
+				w.WriteHeader(http.StatusUnauthorized)
+				fmt.Fprintf(w, err)
+			}
 		} else {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			fmt.Fprintf(w, "Service Unavailable")
