@@ -16,6 +16,9 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/sha512"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -54,6 +57,7 @@ import (
 	"github.com/prometheus/prometheus/tsdb"
 	"github.com/prometheus/prometheus/tsdb/index"
 	"github.com/soheilhy/cmux"
+	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/net/netutil"
 	"google.golang.org/grpc"
 
@@ -84,6 +88,8 @@ var reactRouterPaths = []string{
 	"/tsdb-status",
 	"/version",
 }
+
+var authenticateEnabled = false
 
 // withStackTrace logs the stack trace in case the request panics. The function
 // will re-raise the error which will then be handled by the net/http package.
@@ -241,6 +247,11 @@ type Options struct {
 	RemoteReadSampleLimit      int
 	RemoteReadConcurrencyLimit int
 	RemoteReadBytesInFrame     int
+	BasicAuthFile              string
+	BasicAuthUsername          string
+	BasicAuthHash              string
+	BasicAuthSalt              string
+	BasicAuthIterations        int
 
 	Gatherer   prometheus.Gatherer
 	Registerer prometheus.Registerer
@@ -317,6 +328,13 @@ func New(logger log.Logger, o *Options) *Handler {
 		h.runtimeInfo,
 		h.versionInfo,
 	)
+
+	if h.options.BasicAuthFile != "" {
+		authenticateEnabled = true
+		if h.processBasicAuthFile(h.options.BasicAuthFile) == false {
+			return nil
+		}
+	}
 
 	if o.RoutePrefix != "/" {
 		// If the prefix is missing for the root path, prepend it.
@@ -442,6 +460,30 @@ func New(logger log.Logger, o *Options) *Handler {
 	return h
 }
 
+func (h *Handler) processBasicAuthFile(filename string) bool {
+	type AuthInfo struct {
+		Username string
+		Salt string
+		Hash string
+		Iterations int
+	}
+	var authInfo AuthInfo
+
+	content, err := ioutil.ReadFile(filename)
+	if err != nil {
+		fmt.Printf("Error reading auth file '%s': %s", filename, err)
+		return false
+	}
+
+	json.Unmarshal(content, &authInfo)
+	h.options.BasicAuthUsername = authInfo.Username
+	h.options.BasicAuthSalt = authInfo.Salt
+	h.options.BasicAuthHash = authInfo.Hash
+	h.options.BasicAuthIterations = authInfo.Iterations
+
+	return true
+}
+
 func serveDebug(w http.ResponseWriter, req *http.Request) {
 	ctx := req.Context()
 	subpath := route.Param(ctx, "subpath")
@@ -483,11 +525,46 @@ func (h *Handler) isReady() bool {
 	return ready > 0
 }
 
+func (h *Handler) isAuthenticated(r *http.Request) (bool, string) {
+	if authenticateEnabled == false {
+		return true, ""
+	}
+
+	username, password, ok := r.BasicAuth()
+	if ok == true {
+		hash, err := base64.StdEncoding.DecodeString(h.options.BasicAuthHash)
+		if err != nil {
+			return false, fmt.Sprintf("Error decoding basic auth hash: %s", err)
+		}
+		salt, err := base64.StdEncoding.DecodeString(h.options.BasicAuthSalt)
+		if err != nil {
+			return false, fmt.Sprintf("Error decoding basic auth salt: %s", err)
+		}
+		if username != h.options.BasicAuthUsername {
+			return false, fmt.Sprintf("Invalid user or password")
+		}
+		key := pbkdf2.Key([]byte(password), salt,
+			h.options.BasicAuthIterations, 64, sha512.New)
+		if subtle.ConstantTimeCompare(key, hash) == 0 {
+			return false, fmt.Sprintf("Invalid user or password")
+		}
+	} else {
+		return false, fmt.Sprintf("Error returned by BasicAuth")
+	}
+	return true, ""
+}
+
 // Checks if server is ready, calls f if it is, returns 503 if it is not.
 func (h *Handler) testReady(f http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if h.isReady() {
-			f(w, r)
+			authenticated, err := h.isAuthenticated(r)
+			if authenticated {
+				f(w, r)
+			} else {
+				w.WriteHeader(http.StatusUnauthorized)
+				fmt.Fprintf(w, err)
+			}
 		} else {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			fmt.Fprintf(w, "Service Unavailable")
