@@ -462,9 +462,9 @@ func New(logger log.Logger, o *Options) *Handler {
 
 func (h *Handler) processBasicAuthFile(filename string) bool {
 	type AuthInfo struct {
-		Username string
-		Salt string
-		Hash string
+		Username   string
+		Salt       string
+		Hash       string
 		Iterations int
 	}
 	var authInfo AuthInfo
