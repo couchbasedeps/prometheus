@@ -141,6 +141,9 @@ func main() {
 	a.Flag("config.file", "Prometheus configuration file path.").
 		Default("prometheus.yml").StringVar(&cfg.configFile)
 
+	a.Flag("web.basicauth.config", "Information for basic authentication.").
+		Default("").StringVar(&cfg.web.BasicAuthFile)
+
 	a.Flag("web.listen-address", "Address to listen on for UI, API, and telemetry.").
 		Default("0.0.0.0:9090").StringVar(&cfg.web.ListenAddress)
 
