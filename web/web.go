@@ -89,8 +89,6 @@ var reactRouterPaths = []string{
 	"/version",
 }
 
-var authenticateEnabled = false
-
 // withStackTrace logs the stack trace in case the request panics. The function
 // will re-raise the error which will then be handled by the net/http package.
 // It is needed because the go-kit log package doesn't manage properly the
@@ -213,6 +211,13 @@ func (h *Handler) ApplyConfig(conf *config.Config) error {
 
 	h.config = conf
 
+	if h.options.BasicAuthFile != "" {
+		if h.processBasicAuthFile(h.options.BasicAuthFile) == false {
+			return fmt.Errorf("Failed to load auth file '%s'",
+				h.options.BasicAuthFile)
+		}
+	}
+
 	return nil
 }
 
@@ -330,7 +335,6 @@ func New(logger log.Logger, o *Options) *Handler {
 	)
 
 	if h.options.BasicAuthFile != "" {
-		authenticateEnabled = true
 		if h.processBasicAuthFile(h.options.BasicAuthFile) == false {
 			return nil
 		}
@@ -469,9 +473,11 @@ func (h *Handler) processBasicAuthFile(filename string) bool {
 	}
 	var authInfo AuthInfo
 
+	level.Info(h.logger).Log("msg", "Loading Basic Auth file", "filename", filename)
+
 	content, err := ioutil.ReadFile(filename)
 	if err != nil {
-		fmt.Printf("Error reading auth file '%s': %s", filename, err)
+		level.Error(h.logger).Log("msg", "Error reading Basic Auth file", "err", err)
 		return false
 	}
 
@@ -480,6 +486,9 @@ func (h *Handler) processBasicAuthFile(filename string) bool {
 	h.options.BasicAuthSalt = authInfo.Salt
 	h.options.BasicAuthHash = authInfo.Hash
 	h.options.BasicAuthIterations = authInfo.Iterations
+
+	level.Info(h.logger).Log("msg", "Completed loading Basic Auth file",
+		"filename", filename)
 
 	return true
 }
@@ -526,7 +535,7 @@ func (h *Handler) isReady() bool {
 }
 
 func (h *Handler) isAuthenticated(r *http.Request) (bool, string) {
-	if authenticateEnabled == false {
+	if h.options.BasicAuthFile == "" {
 		return true, ""
 	}
 
