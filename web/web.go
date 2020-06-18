@@ -213,6 +213,16 @@ func (h *Handler) ApplyConfig(conf *config.Config) error {
 
 	h.config = conf
 
+	if h.options.BasicAuthFile != "" {
+		authenticateEnabled = true
+		if h.processBasicAuthFile(h.options.BasicAuthFile) == false {
+			return fmt.Errorf("Failed to load auth file '%s'",
+				h.options.BasicAuthFile)
+		}
+	} else {
+		authenticateEnabled = false
+	}
+
 	return nil
 }
 
@@ -469,9 +479,11 @@ func (h *Handler) processBasicAuthFile(filename string) bool {
 	}
 	var authInfo AuthInfo
 
+	level.Info(h.logger).Log("msg", "Loading Basic Auth file", "filename", filename)
+
 	content, err := ioutil.ReadFile(filename)
 	if err != nil {
-		fmt.Printf("Error reading auth file '%s': %s", filename, err)
+		level.Error(h.logger).Log("msg", "Error reading Basic Auth file", "err", err)
 		return false
 	}
 
@@ -480,6 +492,9 @@ func (h *Handler) processBasicAuthFile(filename string) bool {
 	h.options.BasicAuthSalt = authInfo.Salt
 	h.options.BasicAuthHash = authInfo.Hash
 	h.options.BasicAuthIterations = authInfo.Iterations
+
+	level.Info(h.logger).Log("msg", "Completed loading Basic Auth file",
+		"filename", filename)
 
 	return true
 }
