@@ -362,7 +362,7 @@ func New(logger log.Logger, o *Options) *Handler {
 	router.Get("/config", readyf(h.serveConfig))
 	router.Get("/rules", readyf(h.rules))
 	router.Get("/targets", readyf(h.targets))
-	router.Get("/version", readyf(h.version))
+	router.Get("/version", h.version)
 	router.Get("/service-discovery", readyf(h.serviceDiscovery))
 
 	router.Get("/metrics", promhttp.Handler().ServeHTTP)
@@ -431,8 +431,8 @@ func New(logger log.Logger, o *Options) *Handler {
 	if o.EnableLifecycle {
 		router.Post("/-/quit", checkAuth(h.quit))
 		router.Put("/-/quit", checkAuth(h.quit))
-		router.Post("/-/reload", checkAuth(h.reload))
-		router.Put("/-/reload", checkAuth(h.reload))
+		router.Post("/-/reload", h.reload)
+		router.Put("/-/reload", h.reload)
 	} else {
 		forbiddenAPINotEnabled := func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusForbidden)
