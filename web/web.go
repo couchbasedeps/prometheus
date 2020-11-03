@@ -16,6 +16,9 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/sha512"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -51,6 +54,7 @@ import (
 	"github.com/prometheus/common/route"
 	"github.com/prometheus/common/server"
 	"go.uber.org/atomic"
+	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/net/netutil"
 
 	"github.com/prometheus/prometheus/config"
@@ -209,6 +213,13 @@ func (h *Handler) ApplyConfig(conf *config.Config) error {
 
 	h.config = conf
 
+	if h.options.BasicAuthFile != "" {
+		if h.processBasicAuthFile(h.options.BasicAuthFile) == false {
+			return fmt.Errorf("Failed to load auth file '%s'",
+				h.options.BasicAuthFile)
+		}
+	}
+
 	return nil
 }
 
@@ -244,6 +255,11 @@ type Options struct {
 	RemoteReadSampleLimit      int
 	RemoteReadConcurrencyLimit int
 	RemoteReadBytesInFrame     int
+	BasicAuthFile              string
+	BasicAuthUsername          string
+	BasicAuthHash              string
+	BasicAuthSalt              string
+	BasicAuthIterations        int
 
 	Gatherer   prometheus.Gatherer
 	Registerer prometheus.Registerer
@@ -324,6 +340,12 @@ func New(logger log.Logger, o *Options) *Handler {
 		o.Gatherer,
 	)
 
+	if h.options.BasicAuthFile != "" {
+		if h.processBasicAuthFile(h.options.BasicAuthFile) == false {
+			return nil
+		}
+	}
+
 	if o.RoutePrefix != "/" {
 		// If the prefix is missing for the root path, prepend it.
 		router.Get("/", func(w http.ResponseWriter, r *http.Request) {
@@ -333,6 +355,7 @@ func New(logger log.Logger, o *Options) *Handler {
 	}
 
 	readyf := h.testReady
+	checkAuth := h.checkAuth
 
 	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, path.Join(o.ExternalURL.Path, "/graph"), http.StatusFound)
@@ -345,7 +368,7 @@ func New(logger log.Logger, o *Options) *Handler {
 	router.Get("/config", readyf(h.serveConfig))
 	router.Get("/rules", readyf(h.rules))
 	router.Get("/targets", readyf(h.targets))
-	router.Get("/version", readyf(h.version))
+	router.Get("/version", h.version)
 	router.Get("/service-discovery", readyf(h.serviceDiscovery))
 
 	router.Get("/metrics", promhttp.Handler().ServeHTTP)
@@ -356,63 +379,65 @@ func New(logger log.Logger, o *Options) *Handler {
 
 	router.Get("/consoles/*filepath", readyf(h.consoles))
 
-	router.Get("/static/*filepath", func(w http.ResponseWriter, r *http.Request) {
-		r.URL.Path = path.Join("/static", route.Param(r.Context(), "filepath"))
-		fs := server.StaticFileServer(ui.Assets)
-		fs.ServeHTTP(w, r)
-	})
+	router.Get("/static/*filepath",
+		checkAuth(func(w http.ResponseWriter, r *http.Request) {
+			r.URL.Path = path.Join("/static", route.Param(r.Context(), "filepath"))
+			fs := server.StaticFileServer(ui.Assets)
+			fs.ServeHTTP(w, r)
+		}))
 
 	// Make sure that "<path-prefix>/new" is redirected to "<path-prefix>/new/" and
 	// not just the naked "/new/", which would be the default behavior of the router
 	// with the "RedirectTrailingSlash" option (https://godoc.org/github.com/julienschmidt/httprouter#Router.RedirectTrailingSlash),
 	// and which breaks users with a --web.route-prefix that deviates from the path derived
 	// from the external URL.
-	router.Get("/new", func(w http.ResponseWriter, r *http.Request) {
+	router.Get("/new", checkAuth(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, path.Join(o.ExternalURL.Path, "new")+"/", http.StatusFound)
-	})
+	}))
 
-	router.Get("/new/*filepath", func(w http.ResponseWriter, r *http.Request) {
-		p := route.Param(r.Context(), "filepath")
+	router.Get("/new/*filepath",
+		checkAuth(func(w http.ResponseWriter, r *http.Request) {
+			p := route.Param(r.Context(), "filepath")
 
-		// For paths that the React/Reach router handles, we want to serve the
-		// index.html, but with replaced path prefix placeholder.
-		for _, rp := range reactRouterPaths {
-			if p != rp {
-				continue
-			}
+			// For paths that the React/Reach router handles, we want to serve the
+			// index.html, but with replaced path prefix placeholder.
+			for _, rp := range reactRouterPaths {
+				if p != rp {
+					continue
+				}
 
-			f, err := ui.Assets.Open("/static/react/index.html")
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, "Error opening React index.html: %v", err)
+				f, err := ui.Assets.Open("/static/react/index.html")
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					fmt.Fprintf(w, "Error opening React index.html: %v", err)
+					return
+				}
+				idx, err := ioutil.ReadAll(f)
+				if err != nil {
+					w.WriteHeader(http.StatusInternalServerError)
+					fmt.Fprintf(w, "Error reading React index.html: %v", err)
+					return
+				}
+				replacedIdx := bytes.ReplaceAll(idx, []byte("PATH_PREFIX_PLACEHOLDER"), []byte(o.ExternalURL.Path))
+				replacedIdx = bytes.ReplaceAll(replacedIdx, []byte("CONSOLES_LINK_PLACEHOLDER"), []byte(h.consolesPath()))
+				replacedIdx = bytes.ReplaceAll(replacedIdx, []byte("TITLE_PLACEHOLDER"), []byte(h.options.PageTitle))
+				w.Write(replacedIdx)
 				return
 			}
-			idx, err := ioutil.ReadAll(f)
-			if err != nil {
-				w.WriteHeader(http.StatusInternalServerError)
-				fmt.Fprintf(w, "Error reading React index.html: %v", err)
-				return
-			}
-			replacedIdx := bytes.ReplaceAll(idx, []byte("PATH_PREFIX_PLACEHOLDER"), []byte(o.ExternalURL.Path))
-			replacedIdx = bytes.ReplaceAll(replacedIdx, []byte("CONSOLES_LINK_PLACEHOLDER"), []byte(h.consolesPath()))
-			replacedIdx = bytes.ReplaceAll(replacedIdx, []byte("TITLE_PLACEHOLDER"), []byte(h.options.PageTitle))
-			w.Write(replacedIdx)
-			return
-		}
 
-		// For all other paths, serve auxiliary assets.
-		r.URL.Path = path.Join("/static/react/", p)
-		fs := server.StaticFileServer(ui.Assets)
-		fs.ServeHTTP(w, r)
-	})
+			// For all other paths, serve auxiliary assets.
+			r.URL.Path = path.Join("/static/react/", p)
+			fs := server.StaticFileServer(ui.Assets)
+			fs.ServeHTTP(w, r)
+		}))
 
 	if o.UserAssetsPath != "" {
-		router.Get("/user/*filepath", route.FileServe(o.UserAssetsPath))
+		router.Get("/user/*filepath", checkAuth(route.FileServe(o.UserAssetsPath)))
 	}
 
 	if o.EnableLifecycle {
-		router.Post("/-/quit", h.quit)
-		router.Put("/-/quit", h.quit)
+		router.Post("/-/quit", checkAuth(h.quit))
+		router.Put("/-/quit", checkAuth(h.quit))
 		router.Post("/-/reload", h.reload)
 		router.Put("/-/reload", h.reload)
 	} else {
@@ -434,19 +459,50 @@ func New(logger log.Logger, o *Options) *Handler {
 		w.Write([]byte("Only POST or PUT requests allowed"))
 	})
 
-	router.Get("/debug/*subpath", serveDebug)
-	router.Post("/debug/*subpath", serveDebug)
+	router.Get("/debug/*subpath", checkAuth(serveDebug))
+	router.Post("/debug/*subpath", checkAuth(serveDebug))
 
-	router.Get("/-/healthy", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "Prometheus is Healthy.\n")
-	})
-	router.Get("/-/ready", readyf(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintf(w, "Prometheus is Ready.\n")
-	}))
+	router.Get("/-/healthy",
+		checkAuth(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, "Prometheus is Healthy.\n")
+		}))
+	router.Get("/-/ready",
+		checkAuth(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			fmt.Fprintf(w, "Prometheus is Ready.\n")
+		}))
 
 	return h
+}
+
+func (h *Handler) processBasicAuthFile(filename string) bool {
+	type AuthInfo struct {
+		Username   string
+		Salt       string
+		Hash       string
+		Iterations int
+	}
+	var authInfo AuthInfo
+
+	level.Info(h.logger).Log("msg", "Loading Basic Auth file", "filename", filename)
+
+	content, err := ioutil.ReadFile(filename)
+	if err != nil {
+		level.Error(h.logger).Log("msg", "Error reading Basic Auth file", "err", err)
+		return false
+	}
+
+	json.Unmarshal(content, &authInfo)
+	h.options.BasicAuthUsername = authInfo.Username
+	h.options.BasicAuthSalt = authInfo.Salt
+	h.options.BasicAuthHash = authInfo.Hash
+	h.options.BasicAuthIterations = authInfo.Iterations
+
+	level.Info(h.logger).Log("msg", "Completed loading Basic Auth file",
+		"filename", filename)
+
+	return true
 }
 
 func serveDebug(w http.ResponseWriter, req *http.Request) {
@@ -489,11 +545,58 @@ func (h *Handler) isReady() bool {
 	return h.ready.Load() > 0
 }
 
+func (h *Handler) isAuthenticated(r *http.Request) (bool, string) {
+	if h.options.BasicAuthFile == "" {
+		return true, ""
+	}
+
+	username, password, ok := r.BasicAuth()
+	if ok == true {
+		hash, err := base64.StdEncoding.DecodeString(h.options.BasicAuthHash)
+		if err != nil {
+			return false, fmt.Sprintf("Error decoding basic auth hash: %s", err)
+		}
+		salt, err := base64.StdEncoding.DecodeString(h.options.BasicAuthSalt)
+		if err != nil {
+			return false, fmt.Sprintf("Error decoding basic auth salt: %s", err)
+		}
+		if username != h.options.BasicAuthUsername {
+			return false, fmt.Sprintf("Invalid user or password")
+		}
+		key := pbkdf2.Key([]byte(password), salt,
+			h.options.BasicAuthIterations, 64, sha512.New)
+		if subtle.ConstantTimeCompare(key, hash) == 0 {
+			return false, fmt.Sprintf("Invalid user or password")
+		}
+	} else {
+		return false, fmt.Sprintf("Unauthorized")
+	}
+	return true, ""
+}
+
+func (h *Handler) checkAuth(f http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		authenticated, err := h.isAuthenticated(r)
+		if authenticated {
+			f(w, r)
+		} else {
+			w.WriteHeader(http.StatusUnauthorized)
+			fmt.Fprintf(w, err)
+		}
+	}
+}
+
 // Checks if server is ready, calls f if it is, returns 503 if it is not.
 func (h *Handler) testReady(f http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if h.isReady() {
-			f(w, r)
+			authenticated, err := h.isAuthenticated(r)
+			if authenticated {
+				f(w, r)
+			} else {
+				w.WriteHeader(http.StatusUnauthorized)
+				fmt.Fprintf(w, err)
+			}
 		} else {
 			w.WriteHeader(http.StatusServiceUnavailable)
 			fmt.Fprintf(w, "Service Unavailable")
