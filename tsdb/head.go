@@ -776,6 +776,11 @@ func (h *Head) removeCorruptedMmappedChunks(err error) map[uint64][]*mmappedChun
 	return mmappedChunks
 }
 
+// OverlapsClosedInterval returns true if the head overlaps [mint, maxt].
+func (h *Head) OverlapsClosedInterval(mint, maxt int64) bool {
+	return h.MinTime() <= maxt && mint <= h.MaxTime()
+}
+
 // Truncate removes old data before mint from the head.
 func (h *Head) Truncate(mint int64) (err error) {
 	defer func() {
