@@ -60,11 +60,12 @@ require (
 	github.com/uber/jaeger-lib v2.4.0+incompatible
 	go.uber.org/atomic v1.7.0
 	go.uber.org/goleak v1.1.10
-	golang.org/x/crypto v0.0.0-20201002170205-7f63de1d35b0
-	golang.org/x/net v0.0.0-20201110031124-69a78807bb2b
+	golang.org/x/crypto v0.0.0-20220722155217-630584e8d5aa
+	golang.org/x/net v0.0.0-20211112202133-69e39bad7dc2
 	golang.org/x/oauth2 v0.0.0-20201109201403-9fd604954f58
 	golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9
-	golang.org/x/sys v0.0.0-20201119102817-f84b799fce68
+	golang.org/x/sys v0.0.0-20220803195053-6e608f9ce704
+	golang.org/x/text v0.3.7 // indirect
 	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e
 	golang.org/x/tools v0.0.0-20210106214847-113979e3529a
 	google.golang.org/api v0.35.0
