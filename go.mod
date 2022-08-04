@@ -28,7 +28,7 @@ require (
 	github.com/go-openapi/validate v0.19.14 // indirect
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/snappy v0.0.3
-	github.com/google/pprof v0.0.0-20201117184057-ae444373da19
+	github.com/google/pprof v0.0.0-20210720184732-4bb14d4b1be1
 	github.com/gophercloud/gophercloud v0.14.0
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0
 	github.com/hashicorp/consul/api v1.7.0
@@ -55,20 +55,20 @@ require (
 	github.com/samuel/go-zookeeper v0.0.0-20200724154423-2164a8ac840e
 	github.com/shurcooL/httpfs v0.0.0-20190707220628-8d4bc4ba7749
 	github.com/shurcooL/vfsgen v0.0.0-20200824052919-0d455de96546
-	github.com/stretchr/testify v1.6.1
+	github.com/stretchr/testify v1.7.0
 	github.com/uber/jaeger-client-go v2.25.0+incompatible
 	github.com/uber/jaeger-lib v2.4.0+incompatible
 	go.uber.org/atomic v1.7.0
 	go.uber.org/goleak v1.1.10
 	golang.org/x/crypto v0.0.0-20220722155217-630584e8d5aa
-	golang.org/x/net v0.0.0-20211112202133-69e39bad7dc2
-	golang.org/x/oauth2 v0.0.0-20201109201403-9fd604954f58
-	golang.org/x/sync v0.0.0-20201020160332-67f06af15bc9
+	golang.org/x/net v0.0.0-20220802222814-0bcc04d9c69b
+	golang.org/x/oauth2 v0.0.0-20220722155238-128564f6959c
+	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
 	golang.org/x/sys v0.0.0-20220803195053-6e608f9ce704
-	golang.org/x/text v0.3.7 // indirect
-	golang.org/x/time v0.0.0-20200630173020-3af7569d3a1e
-	golang.org/x/tools v0.0.0-20210106214847-113979e3529a
-	google.golang.org/api v0.35.0
+	golang.org/x/term v0.0.0-20220722155259-a9ba230a4035 // indirect
+	golang.org/x/time v0.0.0-20220722155302-e5dcc9cfc0b9
+	golang.org/x/tools v0.1.5
+	google.golang.org/api v0.84.0
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
 	gopkg.in/fsnotify/fsnotify.v1 v1.4.7
 	gopkg.in/yaml.v2 v2.3.0
