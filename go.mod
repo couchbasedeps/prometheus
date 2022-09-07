@@ -72,7 +72,7 @@ require (
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6
 	gopkg.in/fsnotify/fsnotify.v1 v1.4.7
 	gopkg.in/yaml.v2 v2.3.0
-	gopkg.in/yaml.v3 v3.0.0-20200615113413-eeeca48fe776
+	gopkg.in/yaml.v3 v3.0.1
 	gotest.tools v2.2.0+incompatible // indirect
 	k8s.io/api v0.19.4
 	k8s.io/apimachinery v0.19.4
